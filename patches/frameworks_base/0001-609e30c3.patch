@@ -1,0 +1,37 @@
+From 609e30c38e487a59fb94635661825ad02c6bda05 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Tue, 27 Oct 2026 22:58:48 +0100
+Subject: [PATCH] SystemUI: Keep SIM PIN bouncer visible on heads-up
+
+For a SIM PIN or PUK the keyguard is hidden behind the bouncer, so the
+status bar state is SHADE and the panel counts as fully collapsed. A
+heads-up pinned then (e.g. "USB debugging connected" right after boot)
+calls updateTouchableRegion(), which sets forceWindowCollapsed for one
+frame. isExpanded() let that override keyguard and bouncer, so the whole
+notification shade window went invisible and the bouncer blinked.
+
+Ignore forceWindowCollapsed while the keyguard or the bouncer is showing;
+the window is full screen in those states anyway.
+
+Assisted-by: LLM
+Change-Id: I078e979021fce8b183bf512f8615216e760e7224
+---
+ .../shade/NotificationShadeWindowControllerImpl.java         | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/shade/NotificationShadeWindowControllerImpl.java b/packages/SystemUI/src/com/android/systemui/shade/NotificationShadeWindowControllerImpl.java
+index 6232ded3e8a9e..f17db3294b891 100644
+--- a/packages/SystemUI/src/com/android/systemui/shade/NotificationShadeWindowControllerImpl.java
++++ b/packages/SystemUI/src/com/android/systemui/shade/NotificationShadeWindowControllerImpl.java
+@@ -514,8 +514,9 @@ private void applyVisibility(NotificationShadeWindowState state) {
+     }
+ 
+     private boolean isExpanded(NotificationShadeWindowState state) {
+-        boolean isExpanded = !state.forceWindowCollapsed && (state.isKeyguardShowingAndNotOccluded()
+-                || state.panelVisible || state.keyguardFadingAway || state.bouncerShowing
++        // forceWindowCollapsed must not hide keyguard or bouncer, e.g. the SIM PIN bouncer.
++        boolean isExpanded = state.isKeyguardShowingAndNotOccluded() || state.bouncerShowing
++                || !state.forceWindowCollapsed && (state.panelVisible || state.keyguardFadingAway
+                 || state.headsUpNotificationShowing
+                 || state.scrimsVisibility != ScrimController.TRANSPARENT)
+                 || state.backgroundBlurRadius > 0

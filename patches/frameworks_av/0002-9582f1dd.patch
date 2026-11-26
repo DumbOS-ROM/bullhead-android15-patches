@@ -1,0 +1,92 @@
+From 9582f1ddc0f5af857d196ce04fc31c2326f3f880 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Sat, 21 Nov 2026 20:51:34 +0100
+Subject: [PATCH] libaudioclient: Wait for onNewService before returning the
+ service
+
+ServiceSingleton marks a service valid, then calls onNewService()
+without its lock. A second thread calling getService() in that window
+gets the valid service from mediautils::getService() but returns the
+traits' mService, which onNewService() has not set yet, so the caller
+sees a null AudioFlinger or AudioPolicy.
+
+ImsMedia opens its player and recorder streams on two threads right
+after its process starts. The player lost the race and failed with
+"Could not get audioflinger", so the first Wi-Fi call after boot had
+no downlink audio.
+
+Wait, within the same timeout, until onNewService() has published the
+service.
+
+Assisted-by: LLM
+Change-Id: Ibeeca4f2db41f65e6827eddb5d7a676a9c0b17f7
+---
+ media/libaudioclient/AudioSystem.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index 1430913fcf..a2dc6d2c7c 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -203,6 +203,7 @@ class AudioFlingerServiceTraits {
+         ALOGD("%s: checking for service %s: %p", __func__, getServiceName(), service.get());
+ 
+         ul.lock();
++        if (service) waitForNewService_l(ul, waitMs);
+         // return the IAudioFlinger interface which is adapted
+         // from the media::IAudioFlingerService.
+         return mService;
+@@ -282,6 +283,7 @@ class AudioFlingerServiceTraits {
+             client = mClient;
+             mValid = true;
+         }
++        mCv.notify_all();
+         // TODO(b/375280520) consider registerClient() within mMutex lock.
+         const int64_t token = IPCThreadState::self()->clearCallingIdentity();
+         service->registerClient(client);
+@@ -295,6 +297,14 @@ class AudioFlingerServiceTraits {
+         return sp<AudioFlingerClientAdapter>::make(af);
+     }
+ 
++    // ServiceSingleton marks the service valid before onNewService() sets mService.
++    static void waitForNewService_l(audio_utils::unique_lock<std::mutex>& ul,
++            std::chrono::milliseconds waitMs) REQUIRES(mMutex) {
++        const auto end = std::chrono::steady_clock::now() + waitMs;
++        while (!mValid && mCv.wait_until(ul, end) == std::cv_status::no_timeout) {}
++    }
++
++    static inline std::condition_variable mCv;
+     static inline constinit std::mutex mMutex;
+     static inline constinit sp<AudioSystem::AudioFlingerClient> mClient GUARDED_BY(mMutex);
+     static inline constinit sp<IAudioFlinger> mService GUARDED_BY(mMutex);
+@@ -1011,6 +1021,7 @@ class AudioPolicyServiceTraits {
+             mService = aps;
+             mValid = true;
+         }
++        mCv.notify_all();
+         // TODO(b/375280520) consider registerClient() within mMutex lock.
+         const int64_t token = IPCThreadState::self()->clearCallingIdentity();
+         aps->registerClient(client);
+@@ -1079,6 +1090,7 @@ class AudioPolicyServiceTraits {
+         // (whereupon mService contained the actual local service pointer to use).
+         // we should always return mService.
+         ul.lock();
++        if (service) waitForNewService_l(ul, waitMs);
+         return mService;
+     }
+ 
+@@ -1124,6 +1136,14 @@ class AudioPolicyServiceTraits {
+     }
+ private:
+ 
++    // ServiceSingleton marks the service valid before onNewService() sets mService.
++    static void waitForNewService_l(audio_utils::unique_lock<std::mutex>& ul,
++            std::chrono::milliseconds waitMs) REQUIRES(mMutex) {
++        const auto end = std::chrono::steady_clock::now() + waitMs;
++        while (!mValid && mCv.wait_until(ul, end) == std::cv_status::no_timeout) {}
++    }
++
++    static inline std::condition_variable mCv;
+     static inline constinit std::mutex mMutex;
+     static inline constinit sp<AudioSystem::AudioPolicyServiceClient> mClient GUARDED_BY(mMutex);
+     static inline constinit sp<IAudioPolicyService> mService GUARDED_BY(mMutex);

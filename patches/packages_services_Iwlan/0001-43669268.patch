@@ -1,0 +1,86 @@
+From 436692683088d8141c89d0ccba95389b9df68dd7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Thu, 12 Nov 2026 19:31:32 +0100
+Subject: [PATCH] Create the tunnel interface with the real endpoints
+
+The tunnel interface was created with 192.0.2.0 on both ends, which is
+fine with XFRM interfaces since they ignore the endpoints. Kernels
+without them get a VTI instead, and VTI matches the endpoints against
+the SA addresses on transmit and looks the tunnel up by outer address
+on receive, so no traffic passes.
+
+Use the local address the kernel picks towards the ePDG and the ePDG
+address. If no local address is found, keep the placeholders.
+
+Assisted-by: LLM
+Change-Id: Ibe41ef23cc237a2667f26c5c59227c68f435bf7e
+---
+ .../android/iwlan/epdg/EpdgTunnelManager.java | 26 ++++++++++++++++---
+ 1 file changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/src/com/google/android/iwlan/epdg/EpdgTunnelManager.java b/src/com/google/android/iwlan/epdg/EpdgTunnelManager.java
+index 18526d52..3dff85ad 100644
+--- a/src/com/google/android/iwlan/epdg/EpdgTunnelManager.java
++++ b/src/com/google/android/iwlan/epdg/EpdgTunnelManager.java
+@@ -99,6 +99,7 @@
+ 
+ import java.io.IOException;
+ import java.io.PrintWriter;
++import java.net.DatagramSocket;
+ import java.net.Inet4Address;
+ import java.net.Inet6Address;
+ import java.net.InetAddress;
+@@ -172,6 +173,7 @@ public class EpdgTunnelManager {
+ 
+     // "192.0.2.0" is selected from RFC5737, "IPv4 Address Blocks Reserved for Documentation"
+     private static final InetAddress DUMMY_ADDR = InetAddresses.parseNumericAddress("192.0.2.0");
++    private static final int IKE_NATT_PORT = 4500;
+ 
+     private static final Map<Integer, EpdgTunnelManager> mTunnelManagerInstances =
+             new ConcurrentHashMap<>();
+@@ -943,16 +945,34 @@ private IkeSessionParams tryBuildIkeSessionParams(
+         }
+     }
+ 
+-    private IpSecManager.IpSecTunnelInterface tryCreateIpSecTunnelInterface() {
++    private IpSecManager.IpSecTunnelInterface tryCreateIpSecTunnelInterface(
++            InetAddress epdgAddress) {
++        // XFRM interfaces ignore the endpoints, but VTI matches them against the SA addresses.
++        InetAddress localAddress = getTunnelLocalAddress(epdgAddress);
++        InetAddress remoteAddress = localAddress == DUMMY_ADDR ? DUMMY_ADDR : epdgAddress;
+         try {
+             return mIpSecManager.createIpSecTunnelInterface(
+-                    DUMMY_ADDR /* unused */, DUMMY_ADDR /* unused */, mDefaultNetwork);
++                    localAddress, remoteAddress, mDefaultNetwork);
+         } catch (IpSecManager.ResourceUnavailableException | IOException e) {
+             Log.e(TAG, "Failed to create tunnel interface. " + e);
+             return null;
+         }
+     }
+ 
++    private InetAddress getTunnelLocalAddress(InetAddress epdgAddress) {
++        try (DatagramSocket socket = new DatagramSocket()) {
++            mDefaultNetwork.bindSocket(socket);
++            socket.connect(epdgAddress, IKE_NATT_PORT);
++            InetAddress localAddress = socket.getLocalAddress();
++            if (localAddress != null && !localAddress.isAnyLocalAddress()) {
++                return localAddress;
++            }
++        } catch (IOException | RuntimeException e) {
++            Log.w(TAG, "No local address towards ePDG " + epdgAddress + ": " + e);
++        }
++        return DUMMY_ADDR;
++    }
++
+     private void onBringUpTunnel(
+             TunnelRequestWrapper tunnelRequestWrapper, InetAddress epdgAddress) {
+         TunnelSetupRequest setupRequest = tunnelRequestWrapper.getSetupRequest();
+@@ -979,7 +999,7 @@ private void onBringUpTunnel(
+             return;
+         }
+ 
+-        iface = tryCreateIpSecTunnelInterface();
++        iface = tryCreateIpSecTunnelInterface(epdgAddress);
+         if (Objects.isNull(iface)) {
+             IwlanError iwlanError = new IwlanError(IwlanError.TUNNEL_TRANSFORM_FAILED);
+             reportIwlanError(apnName, iwlanError);

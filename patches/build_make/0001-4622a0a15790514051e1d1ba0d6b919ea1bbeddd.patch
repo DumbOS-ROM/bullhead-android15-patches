@@ -1,0 +1,58 @@
+From 4622a0a15790514051e1d1ba0d6b919ea1bbeddd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Wed, 21 Oct 2026 00:13:38 +0200
+Subject: [PATCH] releasetools: Re-sign the recovery image kept in
+ system/vendor
+
+Devices without a vendor image keep the full recovery image and
+install-recovery.sh under SYSTEM/vendor, where make_recovery_patch puts
+them. Signing only regenerated those files under SYSTEM/ and VENDOR/, so
+the system image kept a recovery image trusting the test OTA keys and an
+install script for that image. Drop the SYSTEM/vendor copies when
+signing and write the rebuilt ones back to SYSTEM/vendor.
+
+Assisted-by: LLM
+---
+ tools/releasetools/add_img_to_target_files.py | 4 ++--
+ tools/releasetools/sign_target_files_apks.py  | 3 +++
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/tools/releasetools/add_img_to_target_files.py b/tools/releasetools/add_img_to_target_files.py
+index 6a9cd70b338..7cbbe8edb04 100644
+--- a/tools/releasetools/add_img_to_target_files.py
++++ b/tools/releasetools/add_img_to_target_files.py
+@@ -275,12 +275,12 @@ def AddSystem(output_zip, recovery_img=None, boot_img=None):
+     return img.name
+ 
+   def output_sink(fn, data):
+-    output_file = os.path.join(OPTIONS.input_tmp, "SYSTEM", fn)
++    output_file = os.path.join(OPTIONS.input_tmp, "SYSTEM", "vendor", fn)
+     with open(output_file, "wb") as ofile:
+       ofile.write(data)
+ 
+     if output_zip:
+-      arc_name = "SYSTEM/" + fn
++      arc_name = "SYSTEM/vendor/" + fn
+       if arc_name in output_zip.namelist():
+         OPTIONS.replace_updated_files_list.append(arc_name)
+       else:
+diff --git a/tools/releasetools/sign_target_files_apks.py b/tools/releasetools/sign_target_files_apks.py
+index 546198921ac..8e38c27645e 100755
+--- a/tools/releasetools/sign_target_files_apks.py
++++ b/tools/releasetools/sign_target_files_apks.py
+@@ -804,12 +804,15 @@ def ProcessTargetFiles(input_tf_zip: zipfile.ZipFile, output_tf_zip: zipfile.Zip
+ 
+     # Ask add_img_to_target_files to rebuild the recovery patch if needed.
+     elif filename in ("SYSTEM/recovery-from-boot.p",
++                      "SYSTEM/vendor/recovery-from-boot.p",
+                       "VENDOR/recovery-from-boot.p",
+ 
+                       "SYSTEM/etc/recovery.img",
++                      "SYSTEM/vendor/etc/recovery.img",
+                       "VENDOR/etc/recovery.img",
+ 
+                       "SYSTEM/bin/install-recovery.sh",
++                      "SYSTEM/vendor/bin/install-recovery.sh",
+                       "VENDOR/bin/install-recovery.sh"):
+       OPTIONS.rebuild_recovery = True
+ 

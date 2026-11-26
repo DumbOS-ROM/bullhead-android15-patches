@@ -1,0 +1,33 @@
+From f2c840af2c879e57a3a9ebf80b4716cd59ca6f00 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Thu, 5 Nov 2026 18:11:42 +0100
+Subject: [PATCH] CachedAppOptimizer: Compact cached apps when there is no
+ freezer
+
+App compaction only starts from onProcessFrozen(), so on kernels
+without the cgroup v2 freezer nothing is ever compacted. When the
+freezer is unavailable, request a full compaction as the process
+becomes cached, as before Android 14. The usual throttles still
+apply, and devices with a freezer are unchanged.
+
+Assisted-by: LLM
+Change-Id: I41e9d982fa3dba7dc0e74d075889ed690c563132
+---
+ .../core/java/com/android/server/am/CachedAppOptimizer.java   | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/services/core/java/com/android/server/am/CachedAppOptimizer.java b/services/core/java/com/android/server/am/CachedAppOptimizer.java
+index 2f5362f53361c..88c6d5f8d429f 100644
+--- a/services/core/java/com/android/server/am/CachedAppOptimizer.java
++++ b/services/core/java/com/android/server/am/CachedAppOptimizer.java
+@@ -1670,6 +1670,10 @@ void onOomAdjustChanged(int oldAdj, int newAdj, ProcessRecord app) {
+             // if the process moved out of cached state
+             if (newAdj < oldAdj && newAdj < ProcessList.CACHED_APP_MIN_ADJ) {
+                 cancelCompactionForProcess(app, CancelCompactReason.OOM_IMPROVEMENT);
++            } else if (!useFreezer() && oldAdj < ProcessList.CACHED_APP_MIN_ADJ
++                    && newAdj >= ProcessList.CACHED_APP_MIN_ADJ) {
++                // Without the freezer, onProcessFrozen() never runs: compact when cached.
++                compactApp(app, CompactProfile.FULL, CompactSource.APP, false);
+             }
+         }
+     }

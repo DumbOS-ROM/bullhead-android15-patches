@@ -1,0 +1,53 @@
+From 6fb07f11c2a711e0b66d409a75bc2852d03d2c0e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Thu, 5 Nov 2026 22:24:50 +0100
+Subject: [PATCH] ZygoteProcess: Keep the USAP pool on the primary zygote only
+
+On a 64-bit device with a 32-bit secondary zygote, each secondary pool
+process costs about 8 MB PSS against 1.6 MB for a primary one, because
+the secondary zygote has few other children to share pages with, and
+32-bit app launches are rare. Tell the secondary zygote to keep no pool
+and fork its launches directly.
+
+On bullhead the pool drops from about 30 MB to 5 MB PSS; 32-bit apps
+still launch through the secondary zygote.
+
+Assisted-by: LLM
+Change-Id: I3d9afab08d5c524f9aca5d822f4d3f0d3a090f21
+---
+ core/java/android/os/ZygoteProcess.java | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/core/java/android/os/ZygoteProcess.java b/core/java/android/os/ZygoteProcess.java
+index 73a74b2f8abc1..7505d7073cbe7 100644
+--- a/core/java/android/os/ZygoteProcess.java
++++ b/core/java/android/os/ZygoteProcess.java
+@@ -445,7 +445,8 @@ private Process.ProcessStartResult zygoteSendArgsAndGetResult(
+          */
+         String msgStr = args.size() + "\n" + String.join("\n", args) + "\n";
+ 
+-        if (shouldAttemptUsapLaunch(zygotePolicyFlags, args)) {
++        if (zygoteState == primaryZygoteState
++                && shouldAttemptUsapLaunch(zygotePolicyFlags, args)) {
+             try {
+                 return attemptUsapSendArgsAndGetResult(zygoteState, msgStr);
+             } catch (IOException ex) {
+@@ -1213,6 +1214,9 @@ public static void waitForConnectionToZygote(LocalSocketAddress zygoteSocketAddr
+      */
+     private void informZygotesOfUsapPoolStatus() {
+         final String command = "1\n--usap-pool-enabled=" + mUsapPoolEnabled + "\n";
++        // Only the primary zygote keeps a pool: a secondary (32-bit) pool shares little with
++        // the rest of the system and is rarely used.
++        final String secondaryCommand = "1\n--usap-pool-enabled=false\n";
+ 
+         synchronized (mLock) {
+             try {
+@@ -1232,7 +1236,7 @@ private void informZygotesOfUsapPoolStatus() {
+                     attemptConnectionToSecondaryZygote();
+ 
+                     try {
+-                        secondaryZygoteState.mZygoteOutputWriter.write(command);
++                        secondaryZygoteState.mZygoteOutputWriter.write(secondaryCommand);
+                         secondaryZygoteState.mZygoteOutputWriter.flush();
+ 
+                         // Wait for the secondary Zygote to finish its work.

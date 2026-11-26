@@ -1,0 +1,33 @@
+From 4c6a0dda527c1f19deaa3b5cba542feb0f2fa195 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Mon, 26 Oct 2026 14:49:56 +0100
+Subject: [PATCH] cc: Allow a device to turn off the shadow call stack
+
+Old vendor code built before x18 was reserved uses it as a scratch
+register. Once such code runs on a thread, code built with the shadow
+call stack on that thread pushes return addresses through a garbage
+x18 and crashes. Let the sanitize/disable_scs soong config variable
+drop SCS for every module.
+
+Assisted-by: LLM
+Change-Id: I7143869d2a4bf76a13df0cdbf2cac098410c703a
+---
+ cc/sanitize.go | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/cc/sanitize.go b/cc/sanitize.go
+index d8d8c7aef4..b1f4104d37 100644
+--- a/cc/sanitize.go
++++ b/cc/sanitize.go
+@@ -645,6 +645,11 @@ func (sanitize *sanitize) begin(ctx BaseModuleContext) {
+ 		s.Scs = nil
+ 	}
+ 
++	// Legacy vendor code that uses x18 as a scratch register breaks SCS code on the same thread.
++	if ctx.Config().VendorConfig("sanitize").Bool("disable_scs") {
++		s.Scs = nil
++	}
++
+ 	// Memtag_heap is only implemented on AArch64.
+ 	// Memtag ABI is Android specific for now, so disable for host.
+ 	if ctx.Arch().ArchType != android.Arm64 || !ctx.toolchain().Bionic() || ctx.Host() {

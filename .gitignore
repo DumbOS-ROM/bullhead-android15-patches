@@ -1,0 +1,8 @@
+release/
+*.log
+*.img
+*.zip
+*.sha256sum
+__pycache__/
+.DS_Store
+Thumbs.db

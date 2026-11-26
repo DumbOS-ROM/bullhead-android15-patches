@@ -1,0 +1,68 @@
+From c29e908665134e689472edd8b7e3a0e0fe59ea7e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Fri, 6 Nov 2026 08:23:49 +0100
+Subject: [PATCH] PersistentDataBlockService: Restore the default FRP secret
+ without an FRP app
+
+A match of the FRP credential deactivates FRP for the current boot
+only. When config_persistentDataPackageName is empty, no app can
+replace the secret afterwards, so a secret left by a previous setup
+with GMS keeps FRP active at every boot once /data is wiped.
+
+When no FRP package is configured, write the default secret after the
+credential matched, as a device that never ran GMS has.
+
+Assisted-by: LLM
+Change-Id: I07b2c23a9f4ca97cbac32eae8decb5b84c99872a
+---
+ .../pdb/PersistentDataBlockService.java       |  4 ++++
+ .../pdb/PersistentDataBlockServiceTest.java   | 21 +++++++++++++++++++
+ 2 files changed, 25 insertions(+)
+
+diff --git a/services/core/java/com/android/server/pdb/PersistentDataBlockService.java b/services/core/java/com/android/server/pdb/PersistentDataBlockService.java
+index fe9a85989cc9a..bd0b180e5ebca 100644
+--- a/services/core/java/com/android/server/pdb/PersistentDataBlockService.java
++++ b/services/core/java/com/android/server/pdb/PersistentDataBlockService.java
+@@ -1328,6 +1328,10 @@ public boolean deactivateFactoryResetProtectionWithoutSecret() {
+                 mFrpActive = false;
+                 setOldSettingForBackworkCompatibility(/* isActive */ mFrpActive);
+             }
++            // Without an FRP management package nothing else can replace the secret.
++            if (mFrpEnforced && mAllowedUid == -1) {
++                updateFrpSecret(new byte[FRP_SECRET_SIZE]);
++            }
+             return true;
+         }
+ 
+diff --git a/services/tests/servicestests/src/com/android/server/pdb/PersistentDataBlockServiceTest.java b/services/tests/servicestests/src/com/android/server/pdb/PersistentDataBlockServiceTest.java
+index cdfc521dff13d..d9247c205a442 100644
+--- a/services/tests/servicestests/src/com/android/server/pdb/PersistentDataBlockServiceTest.java
++++ b/services/tests/servicestests/src/com/android/server/pdb/PersistentDataBlockServiceTest.java
+@@ -945,6 +945,27 @@ public void frpState_PrivilegedDeactivationByAuthorizedCaller() throws Exception
+         assertThat(mPdbService.isFrpActive()).isFalse();
+     }
+ 
++    @Test
++    public void frpState_DeactivationWithoutFrpPackageRestoresDefaultSecret() throws Exception {
++        setUp(/* frpEnforcement */ true);
++        grantConfigureFrpPermission();
++
++        assertThat(mInterface.setFactoryResetProtectionSecret(hashStringto32Bytes("secret")))
++                .isTrue();
++
++        simulateDataWipe();
++        mPdbService.activateFrp();
++        mPdbService.setAllowedUid(-1);
++
++        assertThat(mInternalInterface.deactivateFactoryResetProtectionWithoutSecret()).isTrue();
++        assertThat(mPdbService.isFrpActive()).isFalse();
++
++        simulateDataWipe();
++        mPdbService.activateFrp();
++        assertThat(mPdbService.automaticallyDeactivateFrpIfPossible()).isTrue();
++        assertThat(mPdbService.isFrpActive()).isFalse();
++    }
++
+     @Test
+     public void frpActive_WipeFails() throws Exception {
+         setUp(/* frpEnforcement */ true);

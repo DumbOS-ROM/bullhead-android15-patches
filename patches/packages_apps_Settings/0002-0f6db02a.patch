@@ -1,0 +1,67 @@
+From 0f6db02aa74bd90689094867f59ac359352b5f30 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Fri, 6 Nov 2026 08:23:49 +0100
+Subject: [PATCH] Settings: Disable OEM unlocking while FRP is active
+
+OemLockService and PersistentDataBlockService refuse OEM unlock
+changes while factory reset protection is active, and the exception
+from setOemUnlockAllowedByUser() crashes Settings when the user turns
+the toggle on. Disable the toggle and say why in its summary.
+
+Assisted-by: LLM
+Change-Id: I625349b8d4ba09ae858194922d299d6d5d4bb327
+---
+ res/values/cm_strings.xml                           |  3 +++
+ .../development/OemUnlockPreferenceController.java  | 13 ++++++++++++-
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/res/values/cm_strings.xml b/res/values/cm_strings.xml
+index b3e7df2a079b..fb9730fe8e53 100644
+--- a/res/values/cm_strings.xml
++++ b/res/values/cm_strings.xml
+@@ -197,4 +197,7 @@
+     <string name="battery_maximum_capacity">Maximum capacity</string>
+     <string name="battery_maximum_capacity_summary">%1$d mAh (%2$d%%)</string>
+     <string name="battery_maximum_capacity_not_available" translatable="false">@string/battery_cycle_count_not_available</string>
++
++    <!-- Developer options: OEM unlocking summary while factory reset protection is active -->
++    <string name="oem_unlock_enable_disabled_summary_frp_active">Unavailable while factory reset protection is active</string>
+ </resources>
+diff --git a/src/com/android/settings/development/OemUnlockPreferenceController.java b/src/com/android/settings/development/OemUnlockPreferenceController.java
+index 8149d07f59c2..e74cd6f1bc63 100644
+--- a/src/com/android/settings/development/OemUnlockPreferenceController.java
++++ b/src/com/android/settings/development/OemUnlockPreferenceController.java
+@@ -27,6 +27,7 @@
+ import android.os.UserHandle;
+ import android.os.UserManager;
+ import android.service.oemlock.OemLockManager;
++import android.service.persistentdata.PersistentDataBlockManager;
+ import android.telephony.TelephonyManager;
+ import android.text.TextUtils;
+ import android.util.Log;
+@@ -164,6 +165,8 @@ private void updateOemUnlockSettingDescription() {
+         int oemUnlockSummary = com.android.settingslib.R.string.oem_unlock_enable_summary;
+         if (isBootloaderUnlocked()) {
+             oemUnlockSummary = R.string.oem_unlock_enable_disabled_summary_bootloader_unlocked;
++        } else if (isFrpActive()) {
++            oemUnlockSummary = R.string.oem_unlock_enable_disabled_summary_frp_active;
+         } else if (isSimLockedDevice()) {
+             oemUnlockSummary = R.string.oem_unlock_enable_disabled_summary_sim_locked_device;
+         } else if (!isOemUnlockAllowedByUserAndCarrier()) {
+@@ -203,7 +206,15 @@ boolean isBootloaderUnlocked() {
+     }
+ 
+     private boolean enableOemUnlockPreference() {
+-        return !isBootloaderUnlocked() && isOemUnlockAllowedByUserAndCarrier();
++        return !isBootloaderUnlocked() && !isFrpActive() && isOemUnlockAllowedByUserAndCarrier();
++    }
++
++    /** Returns {@code true} if Factory Reset Protection blocks OEM unlock changes. */
++    @VisibleForTesting
++    boolean isFrpActive() {
++        final PersistentDataBlockManager pdbManager =
++                mContext.getSystemService(PersistentDataBlockManager.class);
++        return pdbManager != null && pdbManager.isFactoryResetProtectionActive();
+     }
+ 
+ 

@@ -1,0 +1,31 @@
+From 03d829a9006e1de3e14633524c58c6269f022658 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Mon, 26 Oct 2026 09:55:29 +0100
+Subject: [PATCH] audio: Size the binder threadpool before starting it
+
+With vndservicemanager the service started the vndbinder threadpool and
+then lowered its maximum to one thread. Android 15 libbinder aborts when
+a started threadpool shrinks, so the HAL crashed on every start and
+system_server hung in AudioSystem until its watchdog killed it.
+
+Assisted-by: LLM
+Change-Id: I7c619c25a6d645d0ae446a132aa5db961c2b9f02
+---
+ audio/common/all-versions/default/service/service.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/audio/common/all-versions/default/service/service.cpp b/audio/common/all-versions/default/service/service.cpp
+index 1557a9505d..c4d28e1d19 100644
+--- a/audio/common/all-versions/default/service/service.cpp
++++ b/audio/common/all-versions/default/service/service.cpp
+@@ -77,9 +77,9 @@ int main(int /* argc */, char* /* argv */ []) {
+ 
+     if (::android::ProcessState::isVndservicemanagerEnabled()) {
+         ::android::ProcessState::initWithDriver("/dev/vndbinder");
+-        ::android::ProcessState::self()->startThreadPool();
+     }
+ 
++    // Size the shared pool before starting it: libbinder aborts if it shrinks afterwards.
+     ABinderProcess_setThreadPoolMaxThreadCount(1);
+     ABinderProcess_startThreadPool();
+ 

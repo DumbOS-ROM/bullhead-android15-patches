@@ -1,0 +1,39 @@
+From fef0e5da32a46b7a78910c01e30aa9ec1282b5e6 Mon Sep 17 00:00:00 2001
+From: Shawn Willden <swillden@google.com>
+Date: Fri, 21 Mar 2025 15:38:19 -0700
+Subject: [PATCH] Catch security exception on isOemUnlockAllowed
+
+As of Android 15, devices with FRP active will throw an exception when loading developer options attempts to update the OEM unlock state, which causes the app to crash.  This CL just catches the exception and reports that OEM unlock is not, in fact, settable.
+
+A full fix should probably tell the user that OEM unlock may not be set because FRP is active, rather than just quietly failing and logging the situation, but because GMS Core is soon going to begin blocking access to the Android UI when FRP is active, meaning that developer options won't even be reachable and the user will be informed about FRP state by GMS Core, the effort that would require isn't justified.
+
+Note that this CL does not add a test for this change because it is not possible for CTS to put the device in FRP-active state to test the relevant case.  Manual testing is required.
+
+Test: SettingsUnitTests
+Flag: EXEMPT bugfix
+Bug: 405023810
+Change-Id: Ic43de93a4208bbc17f2e287d52f9baf281cd678c
+---
+ .../development/OemUnlockPreferenceController.java     | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/settings/development/OemUnlockPreferenceController.java b/src/com/android/settings/development/OemUnlockPreferenceController.java
+index 3053defac868..8149d07f59c2 100644
+--- a/src/com/android/settings/development/OemUnlockPreferenceController.java
++++ b/src/com/android/settings/development/OemUnlockPreferenceController.java
+@@ -236,7 +236,13 @@ boolean isOemUnlockAllowedByUserAndCarrier() {
+ 
+     @VisibleForTesting
+     boolean isOemUnlockedAllowed() {
+-        return mOemLockManager.isOemUnlockAllowed();
++        try {
++            return mOemLockManager.isOemUnlockAllowed();
++        } catch (SecurityException e) {
++            // This exception is thrown if the device is not allowed to check (or change) the OEM
++            // unlock setting because Factory Reset Protection is active.
++            Log.e(TAG, "Failed to check OEM unlock allowed", e);
++            return false;
++        }
+     }
+-
+ }

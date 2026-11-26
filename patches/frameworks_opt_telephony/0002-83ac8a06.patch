@@ -1,0 +1,76 @@
+From 83ac8a06753779cd93f91dde18802ad1f812e77d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Tue, 3 Nov 2026 11:23:56 +0100
+Subject: [PATCH] PhoneSwitcher: notify active data sub on single SIM
+
+On single SIM devices using HAL_COMMAND_ALLOW_DATA, sendRilCommands()
+sends no modem command, so onDdsSwitchResponse() never runs and
+notifyPreferredDataSubIdChanged() is only reached through the "SIM
+refresh" branch of onEvaluate(), which requires an unchanged preferred
+data phone ID.
+
+When the SIM becomes active after boot (hot insert, or a PIN locked SIM
+unlocked later), the preferred data phone ID goes 0 -> -1 -> 0 while
+the sub ID goes -1 -> 1, so TelephonyRegistry keeps an invalid active
+data sub ID and SystemUI shows the mobile icon with an exclamation mark
+although data works.
+
+Notify when the preferred data sub ID changes together with the phone
+ID in that configuration.
+
+Test: m telephony-common FrameworksTelephonyTests
+Assisted-by: LLM
+Change-Id: I3565980ee6b123498ef02f6944660d4dff35f684
+---
+ .../telephony/data/PhoneSwitcher.java         |  5 +++++
+ .../telephony/data/PhoneSwitcherTest.java     | 21 +++++++++++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/src/java/com/android/internal/telephony/data/PhoneSwitcher.java b/src/java/com/android/internal/telephony/data/PhoneSwitcher.java
+index 4d4f0a91fe3..5c568bffa36 100644
+--- a/src/java/com/android/internal/telephony/data/PhoneSwitcher.java
++++ b/src/java/com/android/internal/telephony/data/PhoneSwitcher.java
+@@ -1269,6 +1269,11 @@ protected boolean onEvaluate(boolean requestsChanged, String reason) {
+             sb.append(" preferred data phoneId ").append(oldPreferredDataPhoneId)
+                     .append("->").append(mPreferredDataPhoneId);
+             diffDetected = true;
++            // Single SIM ALLOW_DATA sends no modem command, so onDdsSwitchResponse won't notify
++            if (mActiveModemCount == 1 && mHalCommandToUse != HAL_COMMAND_PREFERRED_DATA
++                    && oldPreferredDataSubId != mPreferredDataSubId.get()) {
++                notifyPreferredDataSubIdChanged();
++            }
+         } else if (oldPreferredDataSubId != mPreferredDataSubId.get()) {
+             logl("SIM refresh, notify dds change");
+             // Inform connectivity about the active data phone
+diff --git a/tests/telephonytests/src/com/android/internal/telephony/data/PhoneSwitcherTest.java b/tests/telephonytests/src/com/android/internal/telephony/data/PhoneSwitcherTest.java
+index 6e41448e752..3453feabb03 100644
+--- a/tests/telephonytests/src/com/android/internal/telephony/data/PhoneSwitcherTest.java
++++ b/tests/telephonytests/src/com/android/internal/telephony/data/PhoneSwitcherTest.java
+@@ -1548,6 +1548,27 @@ public void testSetPreferredDataCallback_voiceCall() throws Exception {
+                 mPhoneSwitcherUT.getAutoSelectedDataSubId());
+     }
+ 
++    @Test
++    public void testSingleSimAllowData_simActivatedAfterBoot_notifiesActiveDataSub()
++            throws Exception {
++        mActiveModemCount = 1;
++        mSupportedModemCount = 1;
++        initialize();
++        addInternetNetworkRequest(null, 50);
++
++        // SIM becomes active after boot, before it is the default data sub.
++        setSlotIndexToSubId(0, 1);
++        mSubChangedListener.onSubscriptionsChanged();
++        processAllMessages();
++        clearInvocations(mTelephonyRegistryManager);
++
++        setDefaultDataSubId(1);
++
++        verify(mCommandsInterface0, never()).setDataAllowed(anyBoolean(), any());
++        verify(mTelephonyRegistryManager).notifyActiveDataSubIdChanged(eq(1));
++        assertEquals(1, mPhoneSwitcherUT.getActiveDataSubId());
++    }
++
+     @Test
+     public void testMultiSimConfigChange() throws Exception {
+         doReturn(true).when(mMockRadioConfig).isSetPreferredDataCommandSupported();

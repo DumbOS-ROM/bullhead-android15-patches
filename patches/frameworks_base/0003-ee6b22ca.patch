@@ -1,0 +1,52 @@
+From ee6b22cae86fc8d4b59702ad82b7423a0e699d06 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Tue, 3 Nov 2026 11:02:49 +0100
+Subject: [PATCH] SettingsLib: Decode the QR area the scanner shows
+
+Scanners return a square at the start of the camera frame to decode,
+and the view, scaled from its top-left corner, shows the start of the
+rotated preview. With the usual 90 degree sensor both are the same
+area. A sensor mounted the other way round, like the Nexus 5X rear
+camera at 270, shows the far end of the frame instead, so a centred
+code half the size of the scanner frame was cut off and never read.
+
+Mirror the decode area along the frame when the preview is rotated by
+180 or 270 degrees.
+
+Assisted-by: LLM
+Change-Id: I3922a452f9932815717efc2f98d6d753848a45c0
+---
+ .../src/com/android/settingslib/qrcode/QrCamera.java        | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java b/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java
+index 5df9b7ce050c0..99dfbcffad154 100644
+--- a/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java
++++ b/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java
+@@ -84,6 +84,7 @@ public class QrCamera extends Handler {
+     private MultiFormatReader mReader;
+     private DecodingTask mDecodeTask;
+     private int mCameraOrientation;
++    private int mDisplayRotation;
+     @VisibleForTesting
+     Camera.Parameters mParameters;
+ 
+@@ -222,6 +223,7 @@ private boolean startPreview() {
+                 break;
+         }
+         final int rotateDegrees = (mCameraOrientation - degrees + 360) % 360;
++        mDisplayRotation = rotateDegrees;
+         mCamera.setDisplayOrientation(rotateDegrees);
+         mCamera.startPreview();
+         if (Camera.Parameters.FOCUS_MODE_AUTO.equals(mParameters.getFocusMode())) {
+@@ -374,6 +376,10 @@ private void setTransformationMatrix() {
+ 
+     private QrYuvLuminanceSource getFrameImage(byte[] imageData) {
+         final Rect frame = mScannerCallback.getFramePosition(mPreviewSize, mCameraOrientation);
++        // A sensor mounted the other way round shows the far end of its frame in the view.
++        if (mDisplayRotation == 180 || mDisplayRotation == 270) {
++            frame.offsetTo(mPreviewSize.getWidth() - frame.right, frame.top);
++        }
+         final QrYuvLuminanceSource image = new QrYuvLuminanceSource(imageData,
+                 mPreviewSize.getWidth(), mPreviewSize.getHeight());
+         return (QrYuvLuminanceSource)

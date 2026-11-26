@@ -1,0 +1,47 @@
+From c4645e64cba953f2c7f292efb284a5e0f27b5452 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Thu, 5 Nov 2026 23:50:20 +0100
+Subject: [PATCH] Zygote: Close the USAP session socket before specializing
+
+A USAP closes the pool's listening socket before specializing but
+keeps the accepted session socket and its command buffer open. The app
+then closes the socket from its finalizer, where libcore's close()
+calls getsockopt() on it and SELinux denies the app domain:
+
+  avc: denied { getopt } for comm="FinalizerDaemon"
+  path="/dev/socket/usap_pool_primary" scontext=u:r:untrusted_app:...
+  tcontext=u:r:zygote:s0 tclass=unix_stream_socket
+
+Free the command buffer once the arguments are parsed and close the
+session socket after the pid is written back, while still in the
+zygote's domain. With the pool enabled, ten app launches gave one
+denial each before and none after.
+
+Assisted-by: LLM
+Change-Id: I896b7078d7e4cc4e94ca5c4726dc28647fc8396f
+---
+ core/java/com/android/internal/os/Zygote.java | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/core/java/com/android/internal/os/Zygote.java b/core/java/com/android/internal/os/Zygote.java
+index cd17ed89058a1..609a094ee6a29 100644
+--- a/core/java/com/android/internal/os/Zygote.java
++++ b/core/java/com/android/internal/os/Zygote.java
+@@ -786,6 +786,7 @@ private static Runnable childMain(@Nullable ZygoteCommandBuffer argBuffer,
+                     applyUidSecurityPolicy(args, peerCredentials);
+                     // TODO (chriswailes): Should this only be run for debug builds?
+                     validateUsapCommand(args);
++                    IoUtils.closeQuietly(tmpArgBuffer);
+                     break;
+                 } catch (Exception ex) {
+                     Log.e("USAP", ex.getMessage());
+@@ -833,6 +834,9 @@ private static Runnable childMain(@Nullable ZygoteCommandBuffer argBuffer,
+                             + ioEx.getMessage());
+                     throw new RuntimeException(ioEx);
+                 } finally {
++                    // Close the session socket before specializing; otherwise the app's
++                    // finalizer closes it later, from a domain that may not query zygote sockets.
++                    IoUtils.closeQuietly(sessionSocket);
+                     try {
+                         // Since the raw FD is created by init and then loaded from an environment
+                         // variable (as opposed to being created by the LocalSocketImpl itself),

@@ -1,0 +1,71 @@
+From 7fbb8be00f6a63f7ff448cc93c7e65304079790a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Thu, 29 Oct 2026 10:49:11 +0100
+Subject: [PATCH] Bound WAP push header length before allocating
+
+decodeWapPdu() casts the WSP header length uintvar to int and allocates
+a byte array of that size. b/517376969 catches RuntimeException around
+it, which covers negative sizes, but a large positive length still
+throws OutOfMemoryError. That is an Error, so it escapes both catches
+and kills com.android.phone; the carrier then redelivers the message.
+
+Reject the PDU when the header length exceeds the bytes left in it.
+
+Test: host harness with WspTypeDecoder; m telephony-common
+      FrameworksTelephonyTests
+Assisted-by: LLM
+Change-Id: I2af969a16e2a8f35380f7404bb17c27bcebb3f56
+---
+ .../internal/telephony/WapPushOverSms.java      |  9 ++++++++-
+ .../internal/telephony/WapPushOverSmsTest.java  | 17 +++++++++++++++++
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/src/java/com/android/internal/telephony/WapPushOverSms.java b/src/java/com/android/internal/telephony/WapPushOverSms.java
+index 6bb558efc8..67886fb7b5 100644
+--- a/src/java/com/android/internal/telephony/WapPushOverSms.java
++++ b/src/java/com/android/internal/telephony/WapPushOverSms.java
+@@ -214,8 +214,15 @@ private DecodedResult decodeWapPdu(byte[] pdu, InboundSmsHandler handler) {
+                 result.statusCode = Intents.RESULT_SMS_GENERIC_ERROR;
+                 return result;
+             }
+-            int headerLength = (int) pduDecoder.getValue32();
++            long rawHeaderLength = pduDecoder.getValue32();
+             index += pduDecoder.getDecodedDataLength();
++            // An oversized length would throw OutOfMemoryError, which the catch below misses.
++            if (rawHeaderLength > pdu.length - index) {
++                if (DBG) Rlog.w(TAG, "Received PDU. Header Length too large: " + rawHeaderLength);
++                result.statusCode = Intents.RESULT_SMS_GENERIC_ERROR;
++                return result;
++            }
++            int headerLength = (int) rawHeaderLength;
+ 
+             int headerStartIndex = index;
+ 
+diff --git a/tests/telephonytests/src/com/android/internal/telephony/WapPushOverSmsTest.java b/tests/telephonytests/src/com/android/internal/telephony/WapPushOverSmsTest.java
+index 59c332b50c..b4fee2937b 100644
+--- a/tests/telephonytests/src/com/android/internal/telephony/WapPushOverSmsTest.java
++++ b/tests/telephonytests/src/com/android/internal/telephony/WapPushOverSmsTest.java
+@@ -225,6 +225,23 @@ public void testDispatchWapPdu_headerLengthExceedsPdu_failsGracefully() {
+                 mWapPushOverSmsUT.dispatchWapPdu(pdu, null, mInboundSmsHandler, null, 0, 0L));
+     }
+ 
++    @Test @SmallTest
++    public void testDispatchWapPdu_hugePositiveHeaderLength_failsGracefully() {
++        doReturn(true).when(mWspTypeDecoder).decodeUintvarInteger(anyInt());
++        doReturn((long) Integer.MAX_VALUE).when(mWspTypeDecoder).getValue32();
++        doReturn(5).when(mWspTypeDecoder).getDecodedDataLength();
++
++        byte[] pdu = {
++                (byte) 0xFF,
++                (byte) 0x06,
++                (byte) 0x87, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0x7F,
++                (byte) 0x00
++        };
++
++        assertEquals(Telephony.Sms.Intents.RESULT_SMS_GENERIC_ERROR,
++                mWapPushOverSmsUT.dispatchWapPdu(pdu, null, mInboundSmsHandler, null, 0, 0L));
++    }
++
+     @Test @SmallTest
+     public void testIsWapPushForMms_malformedHeaderLength_returnsFalse() {
+         doReturn(true).when(mWspTypeDecoder).decodeUintvarInteger(anyInt());

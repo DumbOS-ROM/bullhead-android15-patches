@@ -1,0 +1,55 @@
+From 36e70f158c8c885bf02b7431668c7742d504c197 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Tue, 3 Nov 2026 10:46:34 +0100
+Subject: [PATCH] SettingsLib: Cap the QR scanner preview size
+
+QrCamera picks the largest preview size that matches the view's
+aspect ratio and decodes every frame on the CPU. On the Nexus 5X
+that is 2048x1536, decoded as a 1536x1536 crop plus an inverted
+retry, and the Wi-Fi QR scanner failed to read a sharp code for
+minutes while the camera app read it at once.
+
+Use the largest matching size up to 1280x960, and keep the old
+choice when no supported size fits.
+
+Assisted-by: LLM
+Change-Id: I071312016b37d3009ebeb744b509a65b53f380e9
+---
+ .../src/com/android/settingslib/qrcode/QrCamera.java  | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java b/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java
+index ae17acb5104b8..5df9b7ce050c0 100644
+--- a/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java
++++ b/packages/SettingsLib/src/com/android/settingslib/qrcode/QrCamera.java
+@@ -65,6 +65,9 @@ public class QrCamera extends Handler {
+ 
+     private static final long AUTOFOCUS_INTERVAL_MS = 1500L;
+ 
++    /** Largest preview area to scan; every frame is decoded on the CPU. */
++    private static final int MAX_PREVIEW_PIXELS = 1280 * 960;
++
+     private static Map<DecodeHintType, List<BarcodeFormat>> HINTS = new ArrayMap<>();
+     private static List<BarcodeFormat> FORMATS = new ArrayList<>();
+ 
+@@ -397,12 +400,20 @@ public void handleMessage(Message msg) {
+      * preview size and aspect ratio to choose the best one.
+      */
+     private Size getBestPreviewSize(Camera.Parameters parameters) {
++        final Size capped = getBestPreviewSize(parameters, MAX_PREVIEW_PIXELS);
++        return capped.getWidth() > 0 ? capped : getBestPreviewSize(parameters, Integer.MAX_VALUE);
++    }
++
++    private Size getBestPreviewSize(Camera.Parameters parameters, int maxPixels) {
+         final double minRatioDiffPercent = 0.1;
+         final Size windowSize = mScannerCallback.getViewSize();
+         final double winRatio = getRatio(windowSize.getWidth(), windowSize.getHeight());
+         double bestChoiceRatio = 0;
+         Size bestChoice = new Size(0, 0);
+         for (Camera.Size size : parameters.getSupportedPreviewSizes()) {
++            if (size.width * size.height > maxPixels) {
++                continue;
++            }
+             double ratio = getRatio(size.width, size.height);
+             if (size.height * size.width > bestChoice.getWidth() * bestChoice.getHeight()
+                     && (Math.abs(bestChoiceRatio - winRatio) / winRatio > minRatioDiffPercent

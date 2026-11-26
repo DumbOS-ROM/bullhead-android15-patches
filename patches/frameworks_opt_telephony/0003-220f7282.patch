@@ -1,0 +1,75 @@
+From 220f728247bc39d4895bd6736c2b53b8a6598602 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Th=C3=A9ry?= <romain.thery@ik.me>
+Date: Thu, 19 Nov 2026 10:17:16 +0100
+Subject: [PATCH] Keep the device awake for the IMS retry after disconnect
+
+onDataNetworkDisconnected schedules the re-evaluation after
+carrier_data_call_apn_retry_after_disconnect_long (3 s) with a Handler
+delay, which does not advance while the device is suspended. When the
+ePDG closed the IWLAN IMS tunnel at night, IMS stayed unregistered for
+4.5 and 17 minutes, until the next Doze maintenance window or screen on.
+
+Hold a timed partial wake lock for the retry delay when an IMS data
+network is lost, so the re-evaluation runs on time.
+
+Assisted-by: LLM
+---
+ .../telephony/data/DataNetworkController.java   | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/src/java/com/android/internal/telephony/data/DataNetworkController.java b/src/java/com/android/internal/telephony/data/DataNetworkController.java
+index b5bfc1d318d..bea8446ebd2 100644
+--- a/src/java/com/android/internal/telephony/data/DataNetworkController.java
++++ b/src/java/com/android/internal/telephony/data/DataNetworkController.java
+@@ -39,6 +39,7 @@
+ import android.os.Handler;
+ import android.os.Looper;
+ import android.os.Message;
++import android.os.PowerManager;
+ import android.os.SystemClock;
+ import android.telecom.TelecomManager;
+ import android.telephony.AccessNetworkConstants;
+@@ -246,6 +247,10 @@ public class DataNetworkController extends Handler {
+     private static final long REEVALUATE_UNSATISFIED_NETWORK_REQUESTS_AFTER_DETACHED_DELAY_MILLIS =
+             TimeUnit.SECONDS.toMillis(1);
+ 
++    /** Extra wake lock time after the retry delay, so the re-evaluation itself can run. */
++    private static final long RETRY_AFTER_DISCONNECT_WAKE_LOCK_MARGIN_MILLIS =
++            TimeUnit.SECONDS.toMillis(1);
++
+     /**
+      * The guard timer in milliseconds to limit querying the data usage api stats frequently
+      */
+@@ -286,6 +291,8 @@ public class DataNetworkController extends Handler {
+     @NonNull
+     private final NetworkPolicyManager mNetworkPolicyManager;
+     @NonNull
++    private final PowerManager.WakeLock mRetryAfterDisconnectWakeLock;
++    @NonNull
+     private final SparseArray<DataServiceManager> mDataServiceManagers = new SparseArray<>();
+ 
+     /** The subscription index associated with this data network controller. */
+@@ -1014,6 +1021,10 @@ public void onDataNetworkHandoverRetryStopped(
+         mImsManager = mPhone.getContext().getSystemService(ImsManager.class);
+         mNetworkPolicyManager = mPhone.getContext().getSystemService(NetworkPolicyManager.class);
+         mTelecomManager = mPhone.getContext().getSystemService(TelecomManager.class);
++        mRetryAfterDisconnectWakeLock = mPhone.getContext().getSystemService(PowerManager.class)
++                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
++                        "DataNetworkController:RetryAfterDisconnect");
++        mRetryAfterDisconnectWakeLock.setReferenceCounted(false);
+ 
+         // Use the raw one from ServiceStateTracker instead of the combined one from
+         // mPhone.getServiceState().
+@@ -3381,6 +3392,12 @@ private void onDataNetworkDisconnected(@NonNull DataNetwork dataNetwork,
+         // Immediately reestablish on target transport if network was torn down due to policy
+         long delayMillis = tearDownReason == DataNetwork.TEAR_DOWN_REASON_HANDOVER_NOT_ALLOWED
+                 ? 0 : mDataConfigManager.getRetrySetupAfterDisconnectMillis();
++        // Handler delays stop in suspend; stay awake so IMS comes back on time.
++        if (delayMillis > 0 && dataNetwork.getNetworkCapabilities().hasCapability(
++                NetworkCapabilities.NET_CAPABILITY_IMS)) {
++            mRetryAfterDisconnectWakeLock.acquire(
++                    delayMillis + RETRY_AFTER_DISCONNECT_WAKE_LOCK_MARGIN_MILLIS);
++        }
+         // Sometimes network was unsolicitedly reported lost for reasons. We should re-evaluate
+         // and see if data network can be re-established again.
+         sendMessageDelayed(obtainMessage(EVENT_REEVALUATE_UNSATISFIED_NETWORK_REQUESTS,

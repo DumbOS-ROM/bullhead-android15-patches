@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <!-- Remotes: DumbOS default.xml already defines "github" and "dumbos" -->
+  <remote name="rthery" fetch="https://github.com/rthery" />
+
+  <!--
+    Remove stock LineageOS hardware HALs (using DumbOS project names, without "LineageOS/" prefix)
+    so we can pull rthery / Ultra-Legacy-Hippeastrum msm8992/msm8994/msm8974 HALs.
+    NOTE: Core repos modified by DumbOS (build/make, build/soong, frameworks/base,
+    packages/apps/Settings, frameworks/av, frameworks/opt/telephony, hardware/interfaces,
+    packages/services/Iwlan) are intentionally KEPT on DumbOS-ROM and patched via
+    scripts/apply_patches.sh so DumbOS features are preserved.
+  -->
+  <remove-project name="android_hardware_lineage_interfaces" path="hardware/lineage/interfaces" />
+  <remove-project name="android_hardware_qcom_audio" path="hardware/qcom/audio" />
+  <remove-project name="android_hardware_qcom_bt" path="hardware/qcom/bt" />
+  <remove-project name="android_hardware_qcom_gps" path="hardware/qcom/gps" />
+  <remove-project name="android_hardware_qcom_display" path="hardware/qcom/display" />
+  <remove-project name="android_hardware_qcom_media" path="hardware/qcom/media" />
+
+  <!-- Legacy HALs for msm8992 / Nexus 5X (bullhead) -->
+  <project path="hardware/lineage/interfaces" name="android_hardware_lineage_interfaces" remote="rthery" revision="7f4a3e24d5da4623f3b7b9a517352b4dbef3d2fa" upstream="refs/heads/lineage-22.2-bullhead" />
+  <project path="hardware/qcom/audio" name="android_hardware_qcom_audio" remote="rthery" revision="844d1b258996e7459167fe658020547da415075d" upstream="refs/heads/lineage-22.2-bullhead" groups="qcom,qcom_audio,pdk-qcom" />
+  <project path="hardware/qcom/bt" name="android_hardware_qcom_bt" remote="rthery" revision="629934c6d0c795207b5d32f9859146edd9e2653e" upstream="refs/heads/lineage-22.2-bullhead" groups="qcom,pdk-qcom" />
+  <project path="hardware/qcom/gps" name="android_hardware_qcom_gps" remote="rthery" revision="0f81e065f760356be346345b962e657f59d9471d" upstream="refs/heads/lineage-22.2-bullhead" groups="qcom,qcom_gps,pdk-qcom" />
+  <project path="hardware/qcom/display" name="Ultra-Legacy-Hippeastrum/android_hardware_qcom_display" remote="github" revision="22c917d9f36c48e252d05910faf81e23fa9677a8" upstream="refs/heads/lineage-22.2" groups="qcom,qcom_display,pdk-qcom" />
+  <project path="hardware/qcom/media" name="Ultra-Legacy-Hippeastrum/android_hardware_qcom_media" remote="github" revision="be72de4fa4be75a20794c4b0d5beab982eb95bb5" upstream="refs/heads/lineage-22.2" groups="qcom,pdk-qcom" />
+  <project path="hardware/sony/timekeep" name="android_hardware_sony_timekeep" remote="rthery" revision="e19d9cda29cdc1fd67ee8d266555a9cdb84e83af" upstream="refs/heads/lineage-22.2-bullhead" />
+
+  <!-- DumbOS-ROM Forked Device & Kernel (branch: dumbos-22.2-bullhead), plus Vendor Blobs -->
+  <project path="device/lge/bullhead" name="android_device_lge_bullhead" remote="dumbos" revision="refs/heads/dumbos-22.2-bullhead" />
+  <project path="kernel/lge/bullhead" name="android_kernel_lge_bullhead" remote="dumbos" revision="refs/heads/dumbos-22.2-bullhead" />
+  <project path="vendor/lge/bullhead" name="nexus5x-dev/vendor_lge_bullhead" remote="github" revision="3bce2e142f622a354ae248214e31b6b4424fdfef" upstream="refs/heads/lineage-20.0" />
+</manifest>
